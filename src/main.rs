@@ -1,3 +1,5 @@
+mod board;
+use board::{Board, Square};
 use crossterm::{
     cursor,
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
@@ -6,82 +8,6 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
 };
 use std::io::stdout;
-
-const BOARD_SIZE: usize = 3;
-
-#[derive(Copy, Clone, PartialEq)]
-enum Square {
-    Empty,
-    X,
-    O,
-}
-
-impl Square {
-    fn from_char(c: char) -> Self {
-        match c {
-            'X' => Square::X,
-            'O' => Square::O,
-            _ => Square::Empty,
-        }
-    }
-
-    fn to_char(self) -> char {
-        match self {
-            Square::X => 'X',
-            Square::O => 'O',
-            Square::Empty => ' ',
-        }
-    }
-
-    fn color(self) -> Color {
-        match self {
-            Square::X => Color::Blue,
-            Square::O => Color::Red,
-            Square::Empty => Color::Reset,
-        }
-    }
-}
-
-struct Board {
-    grid: [[Square; BOARD_SIZE]; BOARD_SIZE],
-}
-
-impl Board {
-    fn new() -> Self {
-        Self {
-            grid: [[Square::Empty; BOARD_SIZE]; BOARD_SIZE],
-        }
-    }
-
-    fn print(&self, stdout: &mut std::io::Stdout) -> crossterm::Result<()> {
-        execute!(stdout, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
-        let mut i = 2;
-        for row in self.grid.iter() {
-            for &square in row.iter() {
-                let c = square.to_char();
-                let color = square.color();
-                execute!(
-                    stdout,
-                    SetBackgroundColor(color),
-                    Print(format!(" {} ", c)),
-                    ResetColor,
-                    Print(" ")
-                )?;
-            }
-            execute!(stdout, Print("\n\n"), cursor::MoveTo(0, i))?;
-            i += 2;
-        }
-        Ok(())
-    }
-
-    fn set_square(&mut self, x: usize, y: usize, square: Square) {
-        self.grid[y][x] = square;
-    }
-
-    fn is_empty(&self, x: usize, y: usize) -> bool {
-        self.grid[y][x] == Square::Empty
-    }
-}
 
 fn main() -> crossterm::Result<()> {
     enable_raw_mode()?;
@@ -144,17 +70,31 @@ fn main() -> crossterm::Result<()> {
 
     // Confirm the selection
     let chosen = Square::from_char(options[selected]);
-    let mut board = Board::new();
-    let mut current_player = chosen;
+    let mut board = Board::new(chosen);
+    let current_player = chosen;
     let mut x = 0;
     let mut y = 0;
+
+    fn print_winner(stdout: &mut std::io::Stdout, winner: Square) -> crossterm::Result<()> {
+        execute!(
+            stdout,
+            Clear(ClearType::All),
+            cursor::MoveTo(0, 0),
+            Print("Game over! "),
+            SetBackgroundColor(winner.color()),
+            Print(format!(" {} ", winner.to_char())),
+            ResetColor,
+            Print(" wins! Press any key to exit")
+        )?;
+        Ok(())
+    }
 
     loop {
         board.print(&mut stdout)?;
 
         execute!(
             stdout,
-            cursor::MoveTo(0, (BOARD_SIZE * 2) as u16),
+            cursor::MoveTo(0, (3 * 2) as u16),
             Print("Use arrow keys to move, Enter to place, Ctrl+C to exit")
         )?;
         execute!(stdout, cursor::MoveTo((x * 4) as u16, (y * 2) as u16))?;
@@ -167,7 +107,7 @@ fn main() -> crossterm::Result<()> {
                     }
                 }
                 KeyCode::Right => {
-                    if x < BOARD_SIZE - 1 {
+                    if x < 3 - 1 {
                         x += 1;
                     }
                 }
@@ -177,18 +117,23 @@ fn main() -> crossterm::Result<()> {
                     }
                 }
                 KeyCode::Down => {
-                    if y < BOARD_SIZE - 1 {
+                    if y < 3 - 1 {
                         y += 1;
                     }
                 }
                 KeyCode::Enter => {
                     if board.is_empty(x, y) {
                         board.set_square(x, y, current_player);
-                        current_player = if current_player == Square::X {
-                            Square::O
-                        } else {
-                            Square::X
-                        };
+                        let result = board.check_winner();
+                        if result != 0 {
+                            let winner: Square = match result {
+                                1 => current_player,
+                                -1 => current_player.opposite(),
+                                _ => Square::Empty,
+                            };
+                            print_winner(&mut stdout, winner)?;
+                            return Ok(());
+                        }
                     }
                 }
                 KeyCode::Esc | KeyCode::Char('c') if event.modifiers == KeyModifiers::CONTROL => {
